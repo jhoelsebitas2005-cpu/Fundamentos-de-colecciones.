@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+# inventario.py
+"""
+Sistema avanzado de gestión de inventarios (POO + colecciones + persistencia).
+Autor: (tu nombre)
+Instrucciones: Ejecuta `python inventario.py`. El programa abre un menú interactivo.
+"""
+
+import json
+from typing import Dict, List, Optional, Tuple
+
+
+class Producto:
+    """Clase que representa un producto en el inventario."""
+
+    def __init__(self, producto_id: str, nombre: str, cantidad: int, precio: float):
+        """
+        Args:
+            producto_id: ID único del producto (string para permitir códigos alfanuméricos).
+            nombre: Nombre descriptivo del producto.
+            cantidad: Cantidad en stock (entero).
+            precio: Precio unitario (float).
+        """
+        self._id = str(producto_id)
+        self._nombre = nombre.strip()
+        self._cantidad = int(cantidad)
+        self._precio = float(precio)
+
+    # Getters y setters (propiedades Python)
+    @property
+    def id(self) -> str:
+        return self._id
+
+    @property
+    def nombre(self) -> str:
+        return self._nombre
+
+    @nombre.setter
+    def nombre(self, nuevo_nombre: str):
+        self._nombre = nuevo_nombre.strip()
+
+    @property
+    def cantidad(self) -> int:
+        return self._cantidad
+
+    @cantidad.setter
+    def cantidad(self, nueva_cantidad: int):
+        if int(nueva_cantidad) < 0:
+            raise ValueError("La cantidad no puede ser negativa.")
+        self._cantidad = int(nueva_cantidad)
+
+    @property
+    def precio(self) -> float:
+        return self._precio
+
+    @precio.setter
+    def precio(self, nuevo_precio: float):
+        if float(nuevo_precio) < 0:
+            raise ValueError("El precio no puede ser negativo.")
+        self._precio = float(nuevo_precio)
+
+    def to_dict(self) -> Dict:
+        """Serializa el producto a un dict (útil para JSON)."""
+        return {
+            "id": self._id,
+            "nombre": self._nombre,
+            "cantidad": self._cantidad,
+            "precio": self._precio,
+        }
+
+    @staticmethod
+    def from_dict(d: Dict) -> "Producto":
+        """Crea un Producto desde un dict (deserialización)."""
+        return Producto(d["id"], d["nombre"], d["cantidad"], d["precio"])
+
+    def __repr__(self) -> str:
+        return f"Producto(id={self._id!r}, nombre={self._nombre!r}, cantidad={self._cantidad}, precio={self._precio:.2f})"
+
+
+class Inventario:
+    """
+    Clase Inventario:
+    - Usa un diccionario (self._productos) para mapear product_id -> Producto.
+      Esto permite búsquedas, inserciones y eliminaciones promedio O(1) por ID.
+    """
+
+    def __init__(self):
+        # Diccionario: clave = id (str), valor = Producto
+        self._productos: Dict[str, Producto] = {}
+
+    # ----- Operaciones básicas -----
+    def añadir_producto(self, producto: Producto) -> None:
+        """Añade un producto. Si el ID ya existe, lanza ValueError."""
+        pid = producto.id
+        if pid in self._productos:
+            raise ValueError(f"Ya existe un producto con ID '{pid}'.")
+        self._productos[pid] = producto
+
+    def eliminar_producto(self, producto_id: str) -> None:
+        """Elimina un producto por ID. Si no existe, lanza KeyError."""
+        pid = str(producto_id)
+        if pid not in self._productos:
+            raise KeyError(f"No existe producto con ID '{pid}'.")
+        del self._productos[pid]
+
+    def actualizar_cantidad(self, producto_id: str, nueva_cantidad: int) -> None:
+        pid = str(producto_id)
+        if pid not in self._productos:
+            raise KeyError(f"No existe producto con ID '{pid}'.")
+        self._productos[pid].cantidad = int(nueva_cantidad)
+
+    def actualizar_precio(self, producto_id: str, nuevo_precio: float) -> None:
+        pid = str(producto_id)
+        if pid not in self._productos:
+            raise KeyError(f"No existe producto con ID '{pid}'.")
+        self._productos[pid].precio = float(nuevo_precio)
+
+    def buscar_por_nombre(self, consulta: str) -> List[Producto]:
+        """
+        Busca productos por nombre (caso-insensible, coincidencia parcial).
+        Devuelve una lista de productos que contienen la consulta en su nombre.
+        """
+        q = consulta.strip().lower()
+        resultados: List[Producto] = [
+            p for p in self._productos.values() if q in p.nombre.lower()
+        ]
+        return resultados
+
+    def obtener_producto(self, producto_id: str) -> Optional[Producto]:
+        """Devuelve el Producto si existe, o None."""
+        return self._productos.get(str(producto_id))
+
+    def listar_todos(self) -> List[Producto]:
+        """Devuelve una lista de todos los productos (orden no garantizado)."""
+        return list(self._productos.values())
+
+    def snapshot_inmutable(self) -> Tuple[Tuple[str, Dict], ...]:
+        """
+        Ejemplo de uso de tuplas para una 'foto' inmutable del inventario.
+        Devuelve una tupla de tuplas (id, dict_producto).
+        """
+        return tuple((pid, p.to_dict()) for pid, p in self._productos.items())
+
+    # ----- Persistencia en archivos (JSON) -----
+    def guardar_en_archivo(self, ruta: str) -> None:
+        """Guarda el inventario en formato JSON en la ruta dada."""
+        try:
+            with open(ruta, "w", encoding="utf-8") as f:
+                # Serializamos cada producto con to_dict()
+                data = [p.to_dict() for p in self._productos.values()]
+                json.dump(data, f, ensure_ascii=False, indent=4)
+        except IOError as e:
+            raise IOError(f"Error al guardar archivo: {e}")
+
+    def cargar_desde_archivo(self, ruta: str) -> None:
+        """Carga inventario desde un archivo JSON (sobrescribe el inventario actual)."""
+        try:
+            with open(ruta, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if not isinstance(data, list):
+                    raise ValueError("Formato de archivo inválido: se esperaba una lista de productos.")
+                nuevos: Dict[str, Producto] = {}
+                for item in data:
+                    p = Producto.from_dict(item)
+                    nuevos[p.id] = p
+                # Reemplazamos el inventario actual con lo cargado (operación atómica desde la perspectiva del programa)
+                self._productos = nuevos
+        except FileNotFoundError:
+            raise FileNotFoundError(f"No se encontró el archivo '{ruta}'.")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Error al decodificar JSON: {e}")
+        except IOError as e:
+            raise IOError(f"Error al leer archivo: {e}")
+
+    # ----- Utilidades -----
+    def conteo_productos(self) -> int:
+        return len(self._productos)
+
+
+# ----- Interfaz de usuario (consola) -----
+def menu_principal():
+    print("\n=== Sistema de Gestión de Inventario ===")
+    print("1. Añadir nuevo producto")
+    print("2. Eliminar producto por ID")
+    print("3. Actualizar cantidad")
+    print("4. Actualizar precio")
+    print("5. Buscar productos por nombre")
+    print("6. Mostrar todos los productos")
+    print("7. Guardar inventario a archivo")
+    print("8. Cargar inventario desde archivo (sobrescribe)")
+    print("9. Salir")
+
+
+def entrada_producto_desde_usuario() -> Producto:
+    pid = input("ID único del producto: ").strip()
+    nombre = input("Nombre del producto: ").strip()
+    while True:
+        try:
+            cantidad = int(input("Cantidad inicial: ").strip())
+            if cantidad < 0:
+                raise ValueError
+            break
+        except ValueError:
+            print("Ingrese una cantidad entera >= 0.")
+    while True:
+        try:
+            precio = float(input("Precio unitario: ").strip())
+            if precio < 0:
+                raise ValueError
+            break
+        except ValueError:
+            print("Ingrese un precio numérico >= 0.")
+    return Producto(pid, nombre, cantidad, precio)
+
+
+def imprimir_producto(p: Producto):
+    print(f"ID: {p.id} | Nombre: {p.nombre} | Cantidad: {p.cantidad} | Precio: {p.precio:.2f}")
+
+
+def ejecutar_consola():
+    inv = Inventario()
+    print("¡Bienvenido! Inventario inicial vacío.")
+    while True:
+        menu_principal()
+        opcion = input("Selecciona una opción (1-9): ").strip()
+        try:
+            if opcion == "1":
+                p = entrada_producto_desde_usuario()
+                inv.añadir_producto(p)
+                print("Producto añadido correctamente.")
+            elif opcion == "2":
+                pid = input("ID del producto a eliminar: ").strip()
+                inv.eliminar_producto(pid)
+                print("Producto eliminado.")
+            elif opcion == "3":
+                pid = input("ID del producto a actualizar cantidad: ").strip()
+                nueva = int(input("Nueva cantidad: ").strip())
+                inv.actualizar_cantidad(pid, nueva)
+                print("Cantidad actualizada.")
+            elif opcion == "4":
+                pid = input("ID del producto a actualizar precio: ").strip()
+                nuevo_precio = float(input("Nuevo precio: ").strip())
+                inv.actualizar_precio(pid, nuevo_precio)
+                print("Precio actualizado.")
+            elif opcion == "5":
+                q = input("Nombre o parte del nombre a buscar: ").strip()
+                resultados = inv.buscar_por_nombre(q)
+                if resultados:
+                    print(f"Encontrados {len(resultados)} producto(s):")
+                    for p in resultados:
+                        imprimir_producto(p)
+                else:
+                    print("No se encontraron coincidencias.")
+            elif opcion == "6":
+                todos = inv.listar_todos()
+                if not todos:
+                    print("El inventario está vacío.")
+                else:
+                    print(f"Listado de {len(todos)} producto(s):")
+                    for p in todos:
+                        imprimir_producto(p)
+            elif opcion == "7":
+                ruta = input("Ruta archivo para guardar (ej: inventario.json): ").strip() or "inventario.json"
+                inv.guardar_en_archivo(ruta)
+                print(f"Inventario guardado en '{ruta}'.")
+            elif opcion == "8":
+                ruta = input("Ruta archivo para cargar (ej: inventario.json): ").strip() or "inventario.json"
+                inv.cargar_desde_archivo(ruta)
+                print(f"Inventario cargado desde '{ruta}'.")
+            elif opcion == "9":
+                print("Saliendo. ¡Hasta luego!")
+                break
+            else:
+                print("Opción no válida. Intente de nuevo.")
+        except Exception as e:
+            print(f"Error: {e}")
+
+
+# ----- Ejemplo de pruebas rápidas (no unit tests formales) -----
+def demo_rapido():
+    """Demostración de uso programático (útil para probar sin la UI)."""
+    inv = Inventario()
+    # Añadimos productos
+    inv.añadir_producto(Producto("A001", "Lapicero azul", 120, 0.25))
+    inv.añadir_producto(Producto("A002", "Cuaderno A4", 50, 1.50))
+    inv.añadir_producto(Producto("B100", "Calculadora científica", 10, 12.99))
+    print("Productos iniciales:")
+    for p in inv.listar_todos():
+        imprimir_producto(p)
+
+    # Buscamos
+    print("\nBuscar 'ca':")
+    for p in inv.buscar_por_nombre("ca"):
+        imprimir_producto(p)
+
+    # Actualizamos y guardamos
+    inv.actualizar_cantidad("A001", 100)
+    inv.actualizar_precio("B100", 11.99)
+    inv.guardar_en_archivo("demo_inventario.json")
+    print("\nGuardado demo_inventario.json. Snapshot inmutable:")
+    print(inv.snapshot_inmutable())
+
+
+# Si ejecutas este archivo directamente, se ofrece elegir entre demo o UI
+if __name__ == "__main__":
+    print("Modo de ejecución:")
+    print("1) Interactivo (menú)")
+    print("2) Demo rápido y guardar archivo de ejemplo")
+    modo = input("Selecciona modo (1/2): ").strip()
+    if modo == "2":
+        demo_rapido()
+    else:
+        ejecutar_consola()
